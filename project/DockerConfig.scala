@@ -20,6 +20,6 @@ object DockerConfig {
       case cmd => false
     })
 
-  val trainingSettings = baseSettings ++ Seq(packageName in Docker := "pmd-training")
-  val scoringSettings = baseSettings ++ Seq(packageName in Docker := "pmd-scoring")
+  val trainingSettings = Seq(packageName := "pmd-training") ++ baseSettings
+  val scoringSettings = Seq(packageName := "pmd-scoring") ++ baseSettings
 }

@@ -123,6 +123,8 @@ class AirbnbTrainer extends Trainer {
   }
 
   private def createFeaturePipelineRf(dataset: DataFrame): PipelineModel = {
+    dataset.printSchema()
+
     val continuousFeatureAssembler = new VectorAssembler(uid = "continuous_feature_assembler").
       setInputCols(continuousFeatures).
       setOutputCol("unscaled_continuous_features")
@@ -131,18 +133,17 @@ class AirbnbTrainer extends Trainer {
       setInputCol("unscaled_continuous_features").
       setOutputCol("scaled_continuous_features")
 
-
     val categoricalFeatureIndexers = categoricalFeatures.map {
       feature => new StringIndexer(uid = s"string_indexer_$feature").
         setInputCol(feature).
         setOutputCol(s"${feature}_index")
     }
 
-    val featureCols = categoricalFeatureIndexers.map(_.getOutputCol).union(Seq("scaled_continuous_features"))
+//    val featureCols = categoricalFeatureIndexers.map(_.getOutputCol).union(Seq("scaled_continuous_features"))
 
     // assemble all processes categorical and continuous features into a single feature vector
     val featureAssembler = new VectorAssembler(uid = "feature_assembler").
-      setInputCols(featureCols).
+      setInputCols(Array("scaled_continuous_features")).
       setOutputCol("features")
 
     val estimators: Array[PipelineStage] = Array(continuousFeatureAssembler, continuousFeatureScaler).
