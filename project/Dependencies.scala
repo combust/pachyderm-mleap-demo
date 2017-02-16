@@ -16,11 +16,14 @@ object Dependencies {
     val mleapSpark = "ml.combust.mleap" %% "mleap-spark" % mleapVersion
     val mleapRuntime = "ml.combust.mleap" %% "mleap-runtime" % mleapVersion
     val mleapAvro = "ml.combust.mleap" %% "mleap-avro" % mleapVersion
+    val sparkAvro = "com.databricks" %% "spark-avro" % "3.2.0"
+    val scopt = "com.github.scopt" %% "scopt" % "3.5.0"
+    val config = "com.typesafe" % "config" % "1.3.0"
   }
 
   import Compile._
   val l = libraryDependencies
 
-  val training = l ++= Seq(mleapSpark) ++ spark
-  val scoring = l ++= Seq(mleapRuntime, mleapAvro)
+  val training = l ++= Seq(mleapSpark, sparkAvro, scopt, config) ++ spark
+  val scoring = l ++= Seq(mleapRuntime, mleapAvro, scopt, config)
 }
