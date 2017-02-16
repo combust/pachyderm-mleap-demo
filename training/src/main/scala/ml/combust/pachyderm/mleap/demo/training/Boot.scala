@@ -21,9 +21,13 @@ object Boot extends App {
       (tpe, config) => config.withValue("type", fromAnyRef(tpe))
     }
 
+    def evaluation = opt[String]('s', "summary").text("optional path to model training summary").action {
+      (summary, config) => config.withValue("summary", fromAnyRef(summary))
+    }
+
     cmd("airbnb").text("train airbnb pricing model").action {
       (_, config) => config.withValue("trainer", fromAnyRef("ml.combust.pachyderm.mleap.demo.training.AirbnbTrainer"))
-    }.children(input, output, tpe)
+    }.children(input, output, tpe, evaluation)
   }
 
   parser.parse(args, ConfigFactory.empty()) match {

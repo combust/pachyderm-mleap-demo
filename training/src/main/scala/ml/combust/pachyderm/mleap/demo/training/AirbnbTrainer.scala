@@ -1,9 +1,10 @@
 package ml.combust.pachyderm.mleap.demo.training
 
 import java.io.File
+import java.nio.file.{FileSystems, Files}
 
 import com.typesafe.config.Config
-import org.apache.spark.sql.{DataFrame, SparkSession}
+import org.apache.spark.sql.{DataFrame, ShowString, SparkSession}
 import com.databricks.spark.avro._
 import ml.combust.bundle.BundleFile
 import org.apache.spark.ml.bundle.SparkBundleContext
@@ -11,7 +12,7 @@ import org.apache.spark.ml.{Pipeline, PipelineModel, PipelineStage}
 import org.apache.spark.ml.feature.{OneHotEncoder, StandardScaler, StringIndexer, VectorAssembler}
 import org.apache.spark.ml.regression.{LinearRegression, RandomForestRegressor}
 import ml.combust.mleap.spark.SparkSupport._
-
+import scala.collection.JavaConverters._
 import resource._
 
 /**
@@ -39,6 +40,8 @@ class AirbnbTrainer extends Trainer {
     val inputPath = config.getString("input")
     val outputPath = config.getString("output")
 
+    assert(outputPath.endsWith(".zip"), "must output a zip MLeap bundle file")
+
     val dataset = spark.sqlContext.read.avro(inputPath)
 
     // Step 2. Create our feature pipeline and train it on the entire dataset
@@ -58,10 +61,47 @@ class AirbnbTrainer extends Trainer {
         createPipelineRf(trainingDataset, featurePipeline)
     }
 
+    val modelFile = new File(outputPath)
+    if(modelFile.exists()) { modelFile.delete() }
     val sbc = SparkBundleContext().withDataset(sparkPipelineModel.transform(dataset))
-    (for(bf <- managed(BundleFile(new File(outputPath)))) yield {
+    (for(bf <- managed(BundleFile(modelFile))) yield {
       sparkPipelineModel.writeBundle.save(bf)(sbc).get
     }).tried.get
+
+    if(config.hasPath("summary")) {
+      val summaryPath = config.getString("summary")
+      val strs = Seq(evaluationString(validationDataset, sparkPipelineModel)).asJava
+      val file = FileSystems.getDefault.getPath(summaryPath)
+      Files.deleteIfExists(file)
+      Files.write(file, strs)
+    }
+  }
+
+  private def evaluationString(dataset: DataFrame, model: PipelineModel): String = {
+    import org.apache.spark.sql.functions._
+
+    val sb = new StringBuilder()
+
+    val errors = model.transform(dataset).
+      withColumn("error_percent", abs(col("price") - col("price_prediction")) / col("price")).persist()
+    val mape = errors.select(mean(col("error_percent")).as("mape")).head.getDouble(0)
+
+    val top10 = errors.sort(col("error_percent").asc)
+    val bottom10 = errors.sort(col("error_percent").desc)
+
+    sb.append("Validation Dataset:\n\n")
+    sb.append(s"Number of Samples: ${errors.count()}\n\n")
+    sb.append(s"MAPE: $mape\n\n")
+    sb.append("TOP 10 Most Accurate:\n\n")
+    sb.append(ShowString.showString(top10, 10))
+    sb.append("\n\n")
+    sb.append("TOP 10 Least Accurate:\n\n")
+    sb.append(ShowString.showString(bottom10, 10))
+    sb.append("\n\n")
+
+    errors.unpersist()
+
+    sb.toString
   }
 
   private def createPipelineLr(dataset: DataFrame, featurePipeline: PipelineModel): PipelineModel = {
@@ -123,8 +163,6 @@ class AirbnbTrainer extends Trainer {
   }
 
   private def createFeaturePipelineRf(dataset: DataFrame): PipelineModel = {
-    dataset.printSchema()
-
     val continuousFeatureAssembler = new VectorAssembler(uid = "continuous_feature_assembler").
       setInputCols(continuousFeatures).
       setOutputCol("unscaled_continuous_features")
@@ -139,7 +177,7 @@ class AirbnbTrainer extends Trainer {
         setOutputCol(s"${feature}_index")
     }
 
-//    val featureCols = categoricalFeatureIndexers.map(_.getOutputCol).union(Seq("scaled_continuous_features"))
+    //    val featureCols = categoricalFeatureIndexers.map(_.getOutputCol).union(Seq("scaled_continuous_features"))
 
     // assemble all processes categorical and continuous features into a single feature vector
     val featureAssembler = new VectorAssembler(uid = "feature_assembler").
