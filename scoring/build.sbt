@@ -1,4 +1,8 @@
-import ml.combust.pachyderm.mleap.demo.{Common, Dependencies}
+import ml.combust.pachyderm.mleap.demo.{Common, Dependencies, DockerConfig}
+
+enablePlugins(DockerPlugin, JavaAppPackaging)
+
 
 Common.buildSettings
 Dependencies.scoring
+DockerConfig.scoringSettings
