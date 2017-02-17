@@ -34,7 +34,7 @@ docker run -v /Users/hollinwilkins/Workspace/scratch/data:/data-in \
   -t random-forest \ # train a random forest model
   -i file:///data-in/airbnb.clean.avro \ # input airbnb dataset
   -o /data-out/model.zip \ # set the output location of the model file
-  -e /data-out/summary.txt \ # output path for model summary
+  -s /data-out/summary.txt \ # output path for model summary
   -J-Xmx2048m # make sure Spark has enough memory
 ```
 
