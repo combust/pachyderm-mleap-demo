@@ -28,6 +28,8 @@ This will publish two docker images named `combustml/pmd-training:0.1-SNAPSHOT` 
 
 ## Training
 
+Download the Airbnb training dataset here: [airbnb.clean.avro](https://s3-us-west-2.amazonaws.com/mleap-demo/datasources/airbnb.clean.avro).
+
 ```
 docker run -v /tmp/pmd-in:/data-in \
   -v /tmp/pmd-out:/data-training-out combustml/pmd-training:0.1-SNAPSHOT airbnb \
