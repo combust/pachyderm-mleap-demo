@@ -26,12 +26,12 @@ class Score {
     } else { None }
 
     (for(bf <- managed(BundleFile(new File(modelPath)))) yield {
-      for(transformer <- bf.loadMleapBundle().map(_.root);
+      (for(transformer <- bf.loadMleapBundle().map(_.root);
           frame <- FrameReader(BuiltinFormats.avro).read(new File(inputPath));
           frame2 <- transformer.transform(frame);
           frame3 <- selected(frame2, outputCols)) yield {
-        frame3.writer(BuiltinFormats.avro).save(new File(outputPath))
-      }.get
+        frame3.writer(BuiltinFormats.avro).save(new File(outputPath)).get
+      }).get
     }).tried.get
   }
 
