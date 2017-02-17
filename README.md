@@ -29,8 +29,8 @@ This will publish two docker images named `combustml/pmd-training:0.1-SNAPSHOT` 
 ## Training
 
 ```
-docker run -v /Users/hollinwilkins/Workspace/scratch/data:/data-in \
-  -v /tmp/test:/data-out combustml/pmd-training:0.1-SNAPSHOT airbnb \
+docker run -v /tmp/pmd-in:/data-in \
+  -v /tmp/pmd-out:/data-training-out combustml/pmd-training:0.1-SNAPSHOT airbnb \
   -t random-forest \ # train a random forest model
   -i file:///data-in/airbnb.clean.avro \ # input airbnb dataset
   -o /data-out/model.zip \ # set the output location of the model file
@@ -40,5 +40,13 @@ docker run -v /Users/hollinwilkins/Workspace/scratch/data:/data-in \
 
 ## Scoring
 
-TODO: documentation for how to run the scoring image
+```
+docker run -v /tmp/pmd-out:/data-in1 \
+  -v /tmp/pmd-training-in:/data-int2 \
+  -v /tmp/pmd-scoring-out:/data-out combustml/pmd-scoring:0.1-SNAPSHOT \
+  -m /data-in1/model.zip \
+  -i /data-in2/good.avro \
+  -o /data-out/test-docker.avro \
+  -J-Xmx2048m
+```
 
