@@ -26,27 +26,20 @@ class Score {
       Some(config.getStringList("output-columns").asScala)
     } else { None }
 
+    new File(outputPath).mkdirs()
     (for(bf <- managed(BundleFile(new File(modelPath)))) yield {
       (for(transformer <- bf.loadMleapBundle().map(_.root)) yield {
         new File(inputPath).list().filter(_.endsWith(".avro")).foreach {
           input =>
-            val output = new File(outputPath, input.substring(inputPath.length - 1))
-            transformFile(transformer, new File(input), output, outputCols)
+            val output = new File(outputPath, input)
+            transformFile(transformer, new File(inputPath, input), output, outputCols)
         }
-      }).get
-    }).tried.get
-
-    (for(bf <- managed(BundleFile(new File(modelPath)))) yield {
-      (for(transformer <- bf.loadMleapBundle().map(_.root);
-          frame <- FrameReader(BuiltinFormats.avro).read(new File(inputPath));
-          frame2 <- transformer.transform(frame);
-          frame3 <- selected(frame2, outputCols)) yield {
-        frame3.writer(BuiltinFormats.avro).save(new File(outputPath)).get
       }).get
     }).tried.get
   }
 
   def transformFile(transformer: Transformer, input: File, output: File, cols: Option[Seq[String]]): Unit = {
+    println(s"Transforming: $input to $output")
     (for(frame <- FrameReader(BuiltinFormats.avro).read(input);
         frame2 <- transformer.transform(frame);
         frame3 <- selected(frame2, cols)) yield {
