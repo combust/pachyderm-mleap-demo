@@ -7,11 +7,13 @@ import com.typesafe.config.Config
 import org.apache.spark.sql.{DataFrame, ShowString, SparkSession}
 import com.databricks.spark.avro._
 import ml.combust.bundle.BundleFile
+import ml.combust.bundle.serializer.SerializationFormat
 import org.apache.spark.ml.bundle.SparkBundleContext
 import org.apache.spark.ml.{Pipeline, PipelineModel, PipelineStage}
 import org.apache.spark.ml.feature.{OneHotEncoder, StandardScaler, StringIndexer, VectorAssembler}
 import org.apache.spark.ml.regression.{LinearRegression, RandomForestRegressor}
 import ml.combust.mleap.spark.SparkSupport._
+
 import scala.collection.JavaConverters._
 import resource._
 
@@ -65,7 +67,7 @@ class AirbnbTrainer extends Trainer {
     if(modelFile.exists()) { modelFile.delete() }
     val sbc = SparkBundleContext().withDataset(sparkPipelineModel.transform(dataset))
     (for(bf <- managed(BundleFile(modelFile))) yield {
-      sparkPipelineModel.writeBundle.save(bf)(sbc).get
+      sparkPipelineModel.writeBundle.format(SerializationFormat.Json).save(bf)(sbc).get
     }).tried.get
 
     if(config.hasPath("summary")) {
@@ -176,8 +178,6 @@ class AirbnbTrainer extends Trainer {
         setInputCol(feature).
         setOutputCol(s"${feature}_index")
     }
-
-    //    val featureCols = categoricalFeatureIndexers.map(_.getOutputCol).union(Seq("scaled_continuous_features"))
 
     // assemble all processes categorical and continuous features into a single feature vector
     val featureAssembler = new VectorAssembler(uid = "feature_assembler").

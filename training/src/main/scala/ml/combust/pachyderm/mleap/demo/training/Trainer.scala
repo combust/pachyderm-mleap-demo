@@ -10,7 +10,7 @@ trait Trainer {
   def train(config: Config): Unit = {
     val spark = SparkSession.builder().
       appName("Pachyderm MLeap Demo").
-      master("local[2]").
+      master("local[1]").
       getOrCreate()
 
     sparkTrain(spark, config)

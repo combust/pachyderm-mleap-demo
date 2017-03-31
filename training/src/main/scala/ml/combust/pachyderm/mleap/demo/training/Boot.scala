@@ -36,6 +36,6 @@ object Boot extends App {
         newInstance().
         asInstanceOf[Trainer].
         train(config)
-    case None => // do nothing
+    case None => sys.exit(1)
   }
 }
