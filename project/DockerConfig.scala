@@ -18,6 +18,7 @@ object DockerConfig {
     dockerCommands := dockerCommands.value.filterNot {
       case ExecCmd("RUN", args @ _*) => args.contains("chown")
       case ExecCmd("CMD", _ @ _*) => true
+      case ExecCmd("ENTRYPOINT", _ @ _*) => true
       case cmd => false
     })
 
