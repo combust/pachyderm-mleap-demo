@@ -70,6 +70,14 @@ class AirbnbTrainer extends Trainer {
       sparkPipelineModel.writeBundle.format(SerializationFormat.Json).save(bf)(sbc).get
     }).tried.get
 
+    if(config.hasPath("validation")) {
+      val validationPath = config.getString("validation")
+      val validationPathTmp = validationPath + ".tmp"
+      validationDataset.coalesce(1).write.avro(validationPathTmp)
+      val avroFile = new File(validationPathTmp).listFiles().filter(_.toString.endsWith(".avro")).head
+      Files.copy(avroFile.toPath, new File(validationPath).toPath)
+    }
+
     if(config.hasPath("summary")) {
       val summaryPath = config.getString("summary")
       val strs = Seq(evaluationString(validationDataset, sparkPipelineModel)).asJava
