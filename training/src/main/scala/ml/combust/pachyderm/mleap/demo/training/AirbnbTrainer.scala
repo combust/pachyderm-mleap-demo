@@ -8,6 +8,7 @@ import org.apache.spark.sql.{DataFrame, ShowString, SparkSession}
 import com.databricks.spark.avro._
 import ml.combust.bundle.BundleFile
 import ml.combust.bundle.serializer.SerializationFormat
+import ml.combust.bundle.util.FileUtil
 import org.apache.spark.ml.bundle.SparkBundleContext
 import org.apache.spark.ml.{Pipeline, PipelineModel, PipelineStage}
 import org.apache.spark.ml.feature.{OneHotEncoder, StandardScaler, StringIndexer, VectorAssembler}
@@ -53,7 +54,7 @@ class AirbnbTrainer extends Trainer {
     val nullFilter = allCols.map(_.isNotNull).reduce(_ && _)
     val datasetFiltered = dataset.select(allCols: _*).filter(nullFilter).persist()
 
-    val Array(trainingDataset, validationDataset) = datasetFiltered.randomSplit(Array(0.7, 0.3))
+    val Array(trainingDataset, validationDataset) = datasetFiltered.randomSplit(Array(0.9, 0.1))
     val sparkPipelineModel = config.getString("type") match {
       case "linear-regression" =>
         val featurePipeline = createFeaturePipelineLr(dataset)
@@ -71,11 +72,15 @@ class AirbnbTrainer extends Trainer {
     }).tried.get
 
     if(config.hasPath("validation")) {
-      val validationPath = config.getString("validation")
-      val validationPathTmp = validationPath + ".tmp"
-      validationDataset.coalesce(1).write.avro(validationPathTmp)
-      val avroFile = new File(validationPathTmp).listFiles().filter(_.toString.endsWith(".avro")).head
-      Files.copy(avroFile.toPath, new File(validationPath).toPath)
+      val validationFile = new File(config.getString("validation"))
+      val validationFileTmp = new File(validationFile.toString + ".tmp")
+      if(validationFile.exists()) { validationFile.delete() }
+      if(validationFileTmp.exists()) { FileUtil.rmRf(validationFileTmp.toPath) }
+      
+      validationDataset.coalesce(1).write.avro(validationFileTmp.toString)
+      val avroFile = validationFileTmp.listFiles().filter(_.toString.endsWith(".avro")).head
+      Files.copy(avroFile.toPath, validationFile.toPath)
+      FileUtil.rmRf(validationFileTmp.toPath)
     }
 
     if(config.hasPath("summary")) {
