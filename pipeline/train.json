@@ -1,0 +1,28 @@
+{
+  "pipeline": {
+    "name": "model"
+  },
+  "transform": {
+    "image": "combustml/pmd-training:0.1-SNAPSHOT",
+    "cmd": [ 
+	"/opt/docker/bin/training",
+	"lending-club", 
+	"-i", 
+	"file:///pfs/training/lending_club.avro", 
+	"-o", 
+	"jar:file:///pfs/out/model.zip", 
+	"-J-Xmx2048m"
+    ]
+  },
+  "parallelism_spec": {
+    "strategy": "CONSTANT",
+    "constant": "1"
+  },
+  "input": {
+    "atom": {
+      "repo": "training",
+      "glob": "/"
+    }
+  }
+}
+
