@@ -1,0 +1,38 @@
+{
+  "pipeline": {
+    "name": "scoring"
+  },
+  "transform": {
+    "image": "combustml/pmd-scoring:0.1-SNAPSHOT",
+    "cmd": [ 
+	"/opt/docker/bin/scoring",
+	"-m", 
+	"/pfs/model/model.lr.zip",
+	"-i", 
+	"/pfs/test", 
+	"-o", 
+	"/pfs/out",
+	"-J-Xmx2048m"
+    ]
+  },
+  "parallelism_spec": {
+    "strategy": "CONSTANT",
+    "constant": "1"
+  },
+  "input": {
+    "cross": [
+      {
+        "atom": {
+          "repo": "test",
+          "glob": "/*"
+        }
+      },
+      {
+        "atom": {
+          "repo": "model",
+          "glob": "/"
+        }
+      }
+    ]
+  }
+}
