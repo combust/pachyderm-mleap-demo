@@ -33,6 +33,10 @@ object Boot extends App {
     cmd("airbnb").text("train airbnb pricing model").action {
       (_, config) => config.withValue("trainer", fromAnyRef("ml.combust.pachyderm.mleap.demo.training.AirbnbTrainer"))
     }.children(input, output, validation, tpe, evaluation)
+
+    cmd("lending-club").text("lending club loan classifier").action {
+      (_, config) => config.withValue("trainer", fromAnyRef("ml.combust.pachyderm.mleap.demo.training.LendingClubTrainer"))
+    }.children(input, output, validation, evaluation)
   }
 
   parser.parse(args, ConfigFactory.empty()) match {
