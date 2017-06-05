@@ -7,7 +7,7 @@
     "cmd": [ 
 	"/opt/docker/bin/scoring",
 	"-m", 
-	"/pfs/model/model.lr.zip",
+	"/pfs/model/model.zip",
 	"-i", 
 	"/pfs/test", 
 	"-o", 
