@@ -5,7 +5,7 @@ import Keys._
 
 object Dependencies {
   val sparkVersion = "2.1.0"
-  val mleapVersion = "0.7.0-SNAPSHOT"
+  val mleapVersion = "0.7.0"
 
   object Compile {
     val spark = Seq("org.apache.spark" %% "spark-core" % sparkVersion,

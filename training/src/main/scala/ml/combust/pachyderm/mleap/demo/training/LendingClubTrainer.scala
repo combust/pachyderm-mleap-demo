@@ -1,67 +1,138 @@
 package ml.combust.pachyderm.mleap.demo.training
+import java.io.File
+import java.nio.file.{FileSystems, Files}
+
 import com.typesafe.config.Config
-import org.apache.spark.sql.SparkSession
+import org.apache.spark.sql.{DataFrame, ShowString, SparkSession}
 import com.databricks.spark.avro._
 import ml.combust.bundle.BundleFile
+import ml.combust.bundle.serializer.SerializationFormat
+import ml.combust.bundle.util.FileUtil
 import org.apache.spark.ml.bundle.SparkBundleContext
 import org.apache.spark.ml.classification.{LogisticRegression, RandomForestClassifier}
-import org.apache.spark.ml.{Pipeline, PipelineStage}
+import org.apache.spark.ml.{Pipeline, PipelineModel, PipelineStage}
 import org.apache.spark.ml.feature._
 import ml.combust.mleap.spark.SparkSupport._
-
 import resource._
+
+import scala.collection.JavaConverters._
 
 /**
   * Created by hollinwilkins on 5/24/17.
   */
 class LendingClubTrainer extends Trainer {
+  val continuousFeatures = Array("loan_amount",
+    "dti")
+
+  val categoricalFeatures = Array("loan_title",
+    "emp_length",
+    "state",
+    "fico_score_group_fnl")
+
+  val allFeatures = continuousFeatures.union(categoricalFeatures)
+
   override def sparkTrain(spark: SparkSession, config: Config): Unit = {
     val inputPath = config.getString("input")
     val outputPath = config.getString("output")
 
-    assert(outputPath.endsWith(".zip"), "must output a zip MLeap bundle file, needs to end with .zip")
-    assert(outputPath.startsWith("jar:file://"), "must output a zip MLeap bundle file, needs to begin with jar:file://")
-    val (baseOutputPath, _) = outputPath.splitAt(outputPath.length - 4)
-    val rfOutputPath = s"$baseOutputPath.rf.zip"
-    val lrOutputPath = s"$baseOutputPath.lr.zip"
+    assert(outputPath.endsWith(".zip"), "must output a zip MLeap bundle file")
 
     val dataset = spark.sqlContext.read.avro(inputPath)
 
-    dataset.createOrReplaceTempView("df")
-    val datasetFnl = spark.sqlContext.sql(f"""
-    select
-        loan_amount,
-        fico_score_group_fnl,
-        case when dti >= 10.0
-            then 10.0
-            else dti
-        end as dti,
-        emp_length,
-        case when state in ('CA', 'NY', 'MN', 'IL', 'FL', 'WA', 'MA', 'TX', 'GA', 'OH', 'NJ', 'VA', 'MI')
-            then state
-            else 'Other'
-        end as state,
-        loan_title,
-        approved
-    from df
-    where loan_title in('Debt Consolidation', 'Other', 'Home/Home Improvement', 'Payoff Credit Card', 'Car Payment/Loan',
-    'Business Loan', 'Health/Medical', 'Moving', 'Wedding/Engagement', 'Vacation', 'College', 'Renewable Energy', 'Payoff Bills',
-    'Personal Loan', 'Motorcycle')
-      """)
+    // Step 2. Create our feature pipeline and train it on the entire dataset
 
-    val continuousFeatures = Array("loan_amount",
-      "dti")
-
-    val categoricalFeatures = Array("loan_title",
-      "emp_length",
-      "state",
-      "fico_score_group_fnl")
-
-    val allFeatures = continuousFeatures.union(categoricalFeatures)
-    val allCols = allFeatures.union(Seq("approved")).map(datasetFnl.col)
+    // Filter all null values
+    val allCols = allFeatures.union(Seq("approved")).map(dataset.col)
     val nullFilter = allCols.map(_.isNotNull).reduce(_ && _)
-    val datasetImputedFiltered = datasetFnl.select(allCols: _*).filter(nullFilter).persist()
-    val Array(trainingDataset, validationDataset) = datasetImputedFiltered.randomSplit(Array(0.7, 0.3))
+    val datasetFiltered = dataset.select(allCols: _*).filter(nullFilter).persist()
+
+    val Array(trainingDataset, validationDataset) = datasetFiltered.randomSplit(Array(0.9, 0.1))
+    val sparkPipelineModel = config.getString("type") match {
+      case "logistic-regression" =>
+        val featurePipeline = createFeaturePipelineLr(dataset)
+        createPipelineLr(trainingDataset, featurePipeline)
+      case "random-forest" =>
+        val featurePipeline = createFeaturePipelineRf(dataset)
+        createPipelineRf(trainingDataset, featurePipeline)
+    }
+
+    val modelFile = new File(outputPath)
+    if(modelFile.exists()) { modelFile.delete() }
+    val sbc = SparkBundleContext().withDataset(sparkPipelineModel.transform(dataset))
+    (for(bf <- managed(BundleFile(modelFile))) yield {
+      sparkPipelineModel.writeBundle.format(SerializationFormat.Json).save(bf)(sbc).get
+    }).tried.get
+
+    if(config.hasPath("validation")) {
+      val validationFile = new File(config.getString("validation"))
+      val validationFileTmp = new File(validationFile.toString + ".tmp")
+      if(validationFile.exists()) { validationFile.delete() }
+      if(validationFileTmp.exists()) { FileUtil.rmRf(validationFileTmp.toPath) }
+
+      validationDataset.coalesce(1).write.avro(validationFileTmp.toString)
+      val avroFile = validationFileTmp.listFiles().filter(_.toString.endsWith(".avro")).head
+      Files.copy(avroFile.toPath, validationFile.toPath)
+      FileUtil.rmRf(validationFileTmp.toPath)
+    }
+
+//    if(config.hasPath("summary")) {
+//      val summaryPath = config.getString("summary")
+//      val strs = Seq(evaluationString(validationDataset, sparkPipelineModel)).asJava
+//      val file = FileSystems.getDefault.getPath(summaryPath)
+//      Files.deleteIfExists(file)
+//      Files.write(file, strs)
+//    }
+  }
+
+  private def evaluationString(dataset: DataFrame, model: PipelineModel): String = {
+    import org.apache.spark.sql.functions._
+
+    val sb = new StringBuilder()
+
+    val errors = model.transform(dataset).
+      withColumn("error_percent", abs(col("price") - col("price_prediction")) / col("price")).persist()
+    val mape = errors.select(mean(col("error_percent")).as("mape")).head.getDouble(0)
+
+    val top10 = errors.sort(col("error_percent").asc)
+    val bottom10 = errors.sort(col("error_percent").desc)
+
+    sb.append("Validation Dataset:\n\n")
+    sb.append(s"Number of Samples: ${errors.count()}\n\n")
+    sb.append(s"MAPE: $mape\n\n")
+    sb.append("TOP 10 Most Accurate:\n\n")
+    sb.append(ShowString.showString(top10, 10))
+    sb.append("\n\n")
+    sb.append("TOP 10 Least Accurate:\n\n")
+    sb.append(ShowString.showString(bottom10, 10))
+    sb.append("\n\n")
+
+    errors.unpersist()
+
+    sb.toString
+  }
+
+  private def createPipelineLr(dataset: DataFrame, featurePipeline: PipelineModel): PipelineModel = {
+    val linearRegression = new LogisticRegression(uid = "logistic_regression").
+      setFeaturesCol("features").
+      setLabelCol("approved").
+      setPredictionCol("approved_prediction")
+
+    val sparkPipelineEstimatorLr = new Pipeline().setStages(Array(featurePipeline, linearRegression))
+    sparkPipelineEstimatorLr.fit(dataset)
+  }
+
+  private def createPipelineRf(dataset: DataFrame, featurePipeline: PipelineModel): PipelineModel = {
+    val randomForest = new RandomForestClassifier(uid = "random_forest_classifier").
+      setMaxBins(256).
+      setFeaturesCol("features").
+      setLabelCol("approved").
+      setPredictionCol("approved_prediction")
+
+    val sparkPipelineEstimatorRf = new Pipeline().setStages(Array(featurePipeline, randomForest))
+    sparkPipelineEstimatorRf.fit(dataset)
+  }
+
+  private def createFeaturePipelineLr(dataset: DataFrame): PipelineModel = {
     val continuousFeatureAssembler = new VectorAssembler(uid = "continuous_feature_assembler").
       setInputCols(continuousFeatures).
       setOutputCol("unscaled_continuous_features")
@@ -70,13 +141,43 @@ class LendingClubTrainer extends Trainer {
       setInputCol("unscaled_continuous_features").
       setOutputCol("scaled_continuous_features")
 
-    val polyExpansionAssembler = new VectorAssembler(uid = "poly_expansion_feature_assembler").
-      setInputCols(Array("loan_amount", "dti")).
-      setOutputCol("poly_expansions_features")
 
-    val continuousFeaturePolynomialExpansion = new PolynomialExpansion(uid = "polynomial_expansion_loan_amount").
-      setInputCol("poly_expansions_features").
-      setOutputCol("loan_amount_polynomial_expansion_features")
+    val categoricalFeatureIndexers = categoricalFeatures.map {
+      feature => new StringIndexer(uid = s"string_indexer_$feature").
+        setInputCol(feature).
+        setOutputCol(s"${feature}_index")
+    }
+    val categoricalFeatureOneHotEncoders = categoricalFeatureIndexers.map {
+      indexer => new OneHotEncoder(uid = s"oh_encoder_${indexer.getOutputCol}").
+        setInputCol(indexer.getOutputCol).
+        setOutputCol(s"${indexer.getOutputCol}_oh")
+    }
+
+    val featureCols = categoricalFeatureOneHotEncoders.map(_.getOutputCol).union(Seq("scaled_continuous_features"))
+
+    // assemble all processes categorical and continuous features into a single feature vector
+    val featureAssembler = new VectorAssembler(uid = "feature_assembler").
+      setInputCols(featureCols).
+      setOutputCol("features")
+
+    val estimators: Array[PipelineStage] = Array(continuousFeatureAssembler, continuousFeatureScaler).
+      union(categoricalFeatureIndexers).
+      union(categoricalFeatureOneHotEncoders).
+      union(Seq(featureAssembler))
+
+    new Pipeline(uid = "feature_pipeline").
+      setStages(estimators).
+      fit(dataset)
+  }
+
+  private def createFeaturePipelineRf(dataset: DataFrame): PipelineModel = {
+    val continuousFeatureAssembler = new VectorAssembler(uid = "continuous_feature_assembler").
+      setInputCols(continuousFeatures).
+      setOutputCol("unscaled_continuous_features")
+
+    val continuousFeatureScaler = new StandardScaler(uid = "continuous_feature_scaler").
+      setInputCol("unscaled_continuous_features").
+      setOutputCol("scaled_continuous_features")
 
     val categoricalFeatureIndexers = categoricalFeatures.map {
       feature => new StringIndexer(uid = s"string_indexer_$feature").
@@ -84,57 +185,17 @@ class LendingClubTrainer extends Trainer {
         setOutputCol(s"${feature}_index")
     }
 
-    val categoricalFeatureOneHotEncoders = categoricalFeatureIndexers.map {
-      indexer => new OneHotEncoder(uid = s"oh_encoder_${indexer.getOutputCol}").
-        setInputCol(indexer.getOutputCol).
-        setOutputCol(s"${indexer.getOutputCol}_oh")
-    }
-
-    val featureColsRf = categoricalFeatureIndexers.map(_.getOutputCol).union(Seq("scaled_continuous_features", "loan_amount_polynomial_expansion_features"))
-    val featureColsLr = categoricalFeatureOneHotEncoders.map(_.getOutputCol).union(Seq("scaled_continuous_features"))
-
     // assemble all processes categorical and continuous features into a single feature vector
-    val featureAssemblerLr = new VectorAssembler(uid = "feature_assembler_lr").
-      setInputCols(featureColsLr).
-      setOutputCol("features_lr")
+    val featureAssembler = new VectorAssembler(uid = "feature_assembler").
+      setInputCols(Array("scaled_continuous_features")).
+      setOutputCol("features")
 
-    val featureAssemblerRf = new VectorAssembler(uid = "feature_assembler_rf").
-      setInputCols(featureColsRf).
-      setOutputCol("features_rf")
-
-    val estimators: Array[PipelineStage] = Array(continuousFeatureAssembler, continuousFeatureScaler, polyExpansionAssembler, continuousFeaturePolynomialExpansion).
+    val estimators: Array[PipelineStage] = Array(continuousFeatureAssembler, continuousFeatureScaler).
       union(categoricalFeatureIndexers).
-      union(categoricalFeatureOneHotEncoders).
-      union(Seq(featureAssemblerLr, featureAssemblerRf))
+      union(Seq(featureAssembler))
 
-    val featurePipeline = new Pipeline(uid = "feature_pipeline").
-      setStages(estimators)
-    val sparkFeaturePipelineModel = featurePipeline.fit(datasetImputedFiltered)
-
-    val randomForest = new RandomForestClassifier(uid = "random_forest_classifier").
-      setFeaturesCol("features_rf").
-      setLabelCol("approved").
-      setPredictionCol("approved_prediction")
-
-    val sparkPipelineEstimatorRf = new Pipeline().setStages(Array(sparkFeaturePipelineModel, randomForest))
-    val sparkPipelineRf = sparkPipelineEstimatorRf.fit(datasetImputedFiltered)
-
-    val logisticRegression = new LogisticRegression(uid = "logistic_regression").
-      setFeaturesCol("features_lr").
-      setLabelCol("approved").
-      setPredictionCol("approved_prediction")
-
-    val sparkPipelineEstimatorLr = new Pipeline().setStages(Array(sparkFeaturePipelineModel, logisticRegression))
-    val sparkPipelineLr = sparkPipelineEstimatorLr.fit(datasetImputedFiltered)
-
-    var sbc = SparkBundleContext().withDataset(sparkPipelineLr.transform(datasetImputedFiltered))
-    (for(bf <- managed(BundleFile(lrOutputPath))) yield {
-      sparkPipelineLr.writeBundle.save(bf)(sbc).get
-    }).tried.get
-
-    sbc = SparkBundleContext().withDataset(sparkPipelineRf.transform(datasetImputedFiltered))
-    (for(bf <- managed(BundleFile(rfOutputPath))) yield {
-      sparkPipelineRf.writeBundle.save(bf)(sbc).get
-    }).tried.get
+    new Pipeline(uid = "feature_pipeline").
+      setStages(estimators).
+      fit(dataset)
   }
 }
