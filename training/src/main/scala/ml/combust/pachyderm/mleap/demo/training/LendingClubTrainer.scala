@@ -13,6 +13,7 @@ import org.apache.spark.ml.classification.{LogisticRegression, RandomForestClass
 import org.apache.spark.ml.{Pipeline, PipelineModel, PipelineStage}
 import org.apache.spark.ml.feature._
 import ml.combust.mleap.spark.SparkSupport._
+import org.apache.spark.ml.evaluation.BinaryClassificationEvaluator
 import resource._
 
 import scala.collection.JavaConverters._
@@ -75,38 +76,28 @@ class LendingClubTrainer extends Trainer {
       FileUtil.rmRf(validationFileTmp.toPath)
     }
 
-//    if(config.hasPath("summary")) {
-//      val summaryPath = config.getString("summary")
-//      val strs = Seq(evaluationString(validationDataset, sparkPipelineModel)).asJava
-//      val file = FileSystems.getDefault.getPath(summaryPath)
-//      Files.deleteIfExists(file)
-//      Files.write(file, strs)
-//    }
+    if(config.hasPath("summary")) {
+      val summaryPath = config.getString("summary")
+      val strs = Seq(evaluationString(validationDataset, config.getString("type"), sparkPipelineModel)).asJava
+      val file = FileSystems.getDefault.getPath(summaryPath)
+      Files.deleteIfExists(file)
+      Files.write(file, strs)
+    }
   }
 
-  private def evaluationString(dataset: DataFrame, model: PipelineModel): String = {
-    import org.apache.spark.sql.functions._
-
+  private def evaluationString(dataset: DataFrame, modelType: String, model: PipelineModel): String = {
     val sb = new StringBuilder()
 
-    val errors = model.transform(dataset).
-      withColumn("error_percent", abs(col("price") - col("price_prediction")) / col("price")).persist()
-    val mape = errors.select(mean(col("error_percent")).as("mape")).head.getDouble(0)
+    val evalDataset = model.transform(dataset)
+    val evaluator = new BinaryClassificationEvaluator().
+      setLabelCol("approved").
+      setRawPredictionCol("approved_raw_prediction").
+      setMetricName("areaUnderROC")
+    val areaUnderROC = evaluator.evaluate(evalDataset)
 
-    val top10 = errors.sort(col("error_percent").asc)
-    val bottom10 = errors.sort(col("error_percent").desc)
-
-    sb.append("Validation Dataset:\n\n")
-    sb.append(s"Number of Samples: ${errors.count()}\n\n")
-    sb.append(s"MAPE: $mape\n\n")
-    sb.append("TOP 10 Most Accurate:\n\n")
-    sb.append(ShowString.showString(top10, 10))
+    sb.append(s"Trained Model: $modelType")
     sb.append("\n\n")
-    sb.append("TOP 10 Least Accurate:\n\n")
-    sb.append(ShowString.showString(bottom10, 10))
-    sb.append("\n\n")
-
-    errors.unpersist()
+    sb.append(s"Area Under ROC: $areaUnderROC")
 
     sb.toString
   }
@@ -115,6 +106,7 @@ class LendingClubTrainer extends Trainer {
     val linearRegression = new LogisticRegression(uid = "logistic_regression").
       setFeaturesCol("features").
       setLabelCol("approved").
+      setRawPredictionCol("approved_raw_prediction").
       setPredictionCol("approved_prediction")
 
     val sparkPipelineEstimatorLr = new Pipeline().setStages(Array(featurePipeline, linearRegression))
@@ -126,6 +118,7 @@ class LendingClubTrainer extends Trainer {
       setMaxBins(256).
       setFeaturesCol("features").
       setLabelCol("approved").
+      setRawPredictionCol("approved_raw_prediction").
       setPredictionCol("approved_prediction")
 
     val sparkPipelineEstimatorRf = new Pipeline().setStages(Array(featurePipeline, randomForest))
