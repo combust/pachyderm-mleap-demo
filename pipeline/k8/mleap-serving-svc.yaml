@@ -1,0 +1,18 @@
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    app: lending-club-demo
+    component: mleap-serving
+  name: mleap-serving
+spec:
+  type: LoadBalancer
+  ports:
+  - name: models
+    nodePort: 31300
+    port: 31300
+    protocol: TCP
+    targetPort: 65327
+  selector:
+    app: lending-club-demo
+    component: mleap-serving

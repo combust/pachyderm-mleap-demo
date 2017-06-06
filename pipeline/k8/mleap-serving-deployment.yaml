@@ -1,0 +1,25 @@
+apiVersion: extensions/v1beta1
+kind: Deployment
+metadata:
+  labels:
+    app: lending-club-demo
+    component: mleap-serving
+  name: mleap-serving
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: lending-club-demo
+      component: mleap-serving
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app: lending-club-demo
+        component: mleap-serving
+    spec:
+      restartPolicy: Always
+      containers:
+      - name: mleap-serving
+        image: combustml/mleap-serving:cors
