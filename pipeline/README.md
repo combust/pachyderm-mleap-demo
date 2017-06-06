@@ -41,5 +41,7 @@ $ pachctl list-job
 # observe and confirm the output of the scoring
 $ pachctl list-repo
 $ pachctl list-file scoring master 
-```
 
+# Push the model to MLeap serving
+$ pachctl create-pipeline -f transfer.json
+```

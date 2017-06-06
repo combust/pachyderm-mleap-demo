@@ -7,10 +7,11 @@
     "cmd": [ 
       "curl",
       "-XPUT",
-      "-H 'content-type: application/binary'",
+      "-H", 
+      "content-type: application/binary",
       "--data-binary",
       "@/pfs/model/model.zip",
-      "http://mleap-serving:31300"
+      "http://mleap-serving:31300/model"
     ]
   },
   "parallelism_spec": {
@@ -18,13 +19,9 @@
     "constant": "1"
   },
   "input": {
-    "cross": [
-      {
-        "atom": {
-          "repo": "model",
-          "glob": "/"
-        }
-      }
-    ]
+     "atom": {
+        "repo": "model",
+        "glob": "/"
+     }
   }
 }
