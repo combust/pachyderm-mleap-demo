@@ -7,14 +7,14 @@
     "cmd": [ 
 	"/opt/docker/bin/training",
 	"lending-club", 
-  "-t",
-  "random-forest",
-	"-i", 
+	"-t",
+	"random-forest",
+	"-i",	
 	"file:///pfs/training/lending_club.avro", 
 	"-o", 
 	"/pfs/out/model.zip", 
-  "-s",
-  "/pfs/out/summary.txt",
+ 	"-s",
+ 	"/pfs/out/summary.txt",
 	"-J-Xmx2048m"
     ]
   },
